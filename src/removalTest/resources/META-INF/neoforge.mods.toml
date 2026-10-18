@@ -1,0 +1,7 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+[[mods]]
+modId="removaltest"
+version="1.0.0"
+displayName="Development-only removal test harness"

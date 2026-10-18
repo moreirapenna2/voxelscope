@@ -1,0 +1,83 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+version = '0.3.0'
+group = 'dev.voxelscope'
+base { archivesName = 'voxelscope' }
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+sourceSets {
+    gameTest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    removalTest {
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath - sourceSets.main.output
+    }
+}
+neoForge {
+    version = '21.1.233'
+    runs {
+        client { client() }
+        server { server(); programArgument '--nogui' }
+        gameTestServer {
+            type = 'gameTestServer'
+            systemProperty 'neoforge.enabledGameTestNamespaces', providers.gradleProperty('withoutBridge').isPresent() ? 'removaltest' : 'voxelscope'
+            if (providers.gradleProperty('withoutBridge').isPresent()) sourceSet = sourceSets.removalTest
+        }
+    }
+    mods {
+        if (providers.gradleProperty('withoutBridge').isPresent()) {
+            removaltest { sourceSet(sourceSets.removalTest) }
+        } else {
+            voxelscope { sourceSet(sourceSets.main); sourceSet(sourceSets.gameTest) }
+        }
+    }
+}
+repositories {
+    mavenCentral()
+    maven {
+        url = 'https://modmaven.dev/'
+        content { includeGroup 'mekanism' }
+    }
+}
+
+dependencies {
+    // Optional integrations are resolved publicly, never from a player's installed pack.
+    compileOnly 'org.appliedenergistics:appliedenergistics2:19.2.17'
+    compileOnly 'mekanism:Mekanism:1.21.1-10.7.19.85'
+    compileOnly 'mekanism:Mekanism:1.21.1-10.7.19.85:generators'
+    def integrations = providers.gradleProperty('integrationProfile').getOrElse(
+            providers.gradleProperty('packIntegrations').getOrElse('false').toBoolean() ? 'all' : 'none')
+    if (!(integrations in ['none', 'ae2', 'mekanism', 'all'])) {
+        throw new GradleException('integrationProfile must be none, ae2, mekanism, or all')
+    }
+    if (integrations in ['ae2', 'all']) {
+        runtimeOnly 'org.appliedenergistics:appliedenergistics2:19.2.17'
+    }
+    if (integrations in ['mekanism', 'all']) {
+        runtimeOnly 'mekanism:Mekanism:1.21.1-10.7.19.85'
+    }
+    if (integrations == 'all') {
+        runtimeOnly 'mekanism:Mekanism:1.21.1-10.7.19.85:generators'
+    }
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'com.google.code.gson:gson:2.10.1'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+test { useJUnitPlatform() }
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+tasks.named('jar', Jar) {
+    manifest { attributes 'Implementation-Version': project.version }
+    from('LICENSE')
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.named('processResources', ProcessResources) {
+    inputs.property 'mod_version', project.version
+    filesMatching('META-INF/neoforge.mods.toml') { expand mod_version: project.version }
+}
