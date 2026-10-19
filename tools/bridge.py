@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import sqlite3
 from pathlib import Path
 import sys
 import time
@@ -36,6 +37,10 @@ def main():
     parser.add_argument("--instance", type=Path, default=DEFAULT_INSTANCE, help="Minecraft instance/server directory (default: VOXELSCOPE_INSTANCE or current directory)")
     parser.add_argument("--index-dir", type=Path, help="Store the local index outside the instance folder")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("doctor", help="Check installation and connection without printing credentials")
+    migration = commands.add_parser("migrate", help="Import legacy labels/history without overwriting existing data")
+    migration.add_argument("--source", type=Path, required=True)
+    migration.add_argument("--dry-run", action="store_true")
     commands.add_parser("status")
     commands.add_parser("players")
     entity = commands.add_parser("entity", help="Inspect one loaded entity by UUID (mod 0.3.0+)")
@@ -84,10 +89,18 @@ def main():
     index_dir = args.pop("index_dir")
     command = args.pop("command")
     try:
-        if command in ("scan", "find", "label", "inspect"):
+        if command == "doctor":
+            from diagnostics import diagnose
+            result = diagnose(instance, lambda route, params: query(instance, route, params))
+        elif command == "migrate":
+            from migration import migrate
+            result = migrate(args["source"], index_dir or instance / "voxelscope", args["dry_run"])
+        elif command in ("scan", "find", "label", "inspect"):
             result = indexed_query(instance, command, args, index_dir)
         else:
             result = query(instance, command, {key: value for key, value in args.items() if value is not None})
+    except sqlite3.Error:
+        result = {"error": "migration_database_invalid", "hint": "Check the legacy databases; no existing destination data was replaced."}
     except FileNotFoundError:
         result = {"error": "bridge_not_running", "hint": "Install the bridge and open a world, or select the correct instance."}
     except HTTPError as error:
@@ -97,10 +110,13 @@ def main():
             result = {"error": "http_error", "status": error.code}
     except (URLError, TimeoutError):
         result = {"error": "bridge_unreachable", "hint": "The world may be closed, paused, or still starting."}
-    except (ValueError, OSError):
-        result = {"error": "invalid_connection_or_response"}
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        if command == "migrate" and isinstance(error, ValueError):
+            result = {"error": "migration_rejected", "reason": str(error)[:256]}
+        else:
+            result = {"error": "invalid_connection_or_response"}
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
-    return 1 if "error" in result else 0
+    return 1 if "error" in result or command == "doctor" and result.get("status") != "ready" else 0
 
 
 def indexed_query(instance, command, args, index_dir=None):

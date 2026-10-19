@@ -70,10 +70,11 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(1, metric["delta"])
         self.assertTrue(metric["stale"])
 
-    def test_discovery_escapes_keys_and_excludes_boolean_numbers(self):
+    def test_discovery_escapes_keys_and_distinguishes_states_from_numbers(self):
         result = discover({"x": 1, "game_tick": 5, "active": True, "energy": {"stored_fe": 10, "capacity_fe": 20}, "a/b": {"~": 3}})
         fields = {f["path"]: f for f in result["fields"]}
-        self.assertFalse(fields["/active"]["monitorable"])
+        self.assertTrue(fields["/active"]["monitorable"])
+        self.assertEqual("state", fields["/active"]["suggested_kind"])
         self.assertFalse(fields["/x"]["monitorable"])
         self.assertEqual("/energy/capacity_fe", fields["/energy/stored_fe"]["capacity_path"])
         self.assertIn("/a~1b/~0", fields)

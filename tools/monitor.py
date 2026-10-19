@@ -7,7 +7,7 @@ import sys
 from urllib.error import HTTPError
 from bridge import DEFAULT_INSTANCE, query
 from local_index import Index
-from monitoring import MonitorStore, collect, discover, inferred_unit, numeric, pointer_get, capacity_path
+from monitoring import MonitorStore, collect, discover, inferred_unit, numeric, pointer_get, capacity_path, state_value, state_key
 
 
 
@@ -41,6 +41,8 @@ def main():
         p.add_argument("--params", help="Explicit read-only query parameters as JSON, instead of a saved label")
         if command == "add":
             p.add_argument("--field", action="append", help="JSON pointer; repeat to select fields")
+            p.add_argument("--kind", choices=("auto", "number", "state"), default="auto", help="auto uses states for booleans/strings and numbers otherwise")
+            p.add_argument("--state-label", action="append", default=[], metavar="VALUE=TEXT", help="Name a state transition, for one selected field; e.g. false=Reactor stopped")
             p.add_argument("--unit", help="Explicit unit for a single field")
             p.add_argument("--capacity", help="Capacity JSON pointer for a single field")
             p.add_argument("--below", type=float, help="Record a local event when one field crosses below this")
@@ -82,19 +84,42 @@ def main():
             found = discover(snapshot)
             if args.command == "discover":
                 if args.route == "data":
-                    result = dict(snapshot, monitor_value_path="/value" if numeric(snapshot.get("value")) else None)
+                    result = dict(snapshot, monitor_value_path="/value" if numeric(snapshot.get("value")) or state_value(snapshot.get("value")) else None)
                 else:
                     result = dict(found, world_id=world, source=args.route, label=args.label or args.name)
             else:
-                if args.route == "data" and not numeric(snapshot.get("value")):
-                    raise ValueError("Select a numeric saved field using --params with its saved-data path first")
+                if args.route == "data" and not (numeric(snapshot.get("value")) or state_value(snapshot.get("value"))):
+                    raise ValueError("Select a scalar saved field using --params with its saved-data path first")
                 paths = args.field or (["/value"] if args.route == "data" else [f["path"] for f in found["fields"] if f["monitorable"]])
                 if len(paths) != 1 and any(v is not None for v in (args.unit, args.capacity, args.below, args.above)):
                     raise ValueError("Unit/capacity/threshold options require exactly one --field")
+                if args.state_label and len(paths) != 1:
+                    raise ValueError("State labels require exactly one selected field")
+                labels = {}
+                for item in args.state_label:
+                    raw, separator, label = item.partition("=")
+                    if not separator or not label or len(label) > 80:
+                        raise ValueError("Use --state-label VALUE=TEXT, with text up to 80 characters")
+                    try:
+                        value = json.loads(raw)
+                    except ValueError:
+                        value = raw
+                    if not state_value(value):
+                        raise ValueError("State label values must be booleans, short strings, or integers")
+                    labels[state_key(value)] = label
                 metrics = []
                 for path in paths:
-                    if not numeric(pointer_get(snapshot, path)):
-                        raise ValueError("Selected field is not an available finite number: " + path)
+                    value = pointer_get(snapshot, path)
+                    kind = args.kind if args.kind != "auto" else "state" if isinstance(value, (bool, str)) else "number"
+                    if not (state_value(value) if kind == "state" else numeric(value)):
+                        raise ValueError("Selected field is not an available " + kind + ": " + path)
+                    if kind == "state":
+                        if any(v is not None for v in (args.unit, args.capacity, args.below, args.above)):
+                            raise ValueError("State fields cannot use numeric units, capacities, or thresholds")
+                        metrics.append({"path": path, "kind": "state", "state_labels": labels})
+                        continue
+                    if labels:
+                        raise ValueError("State labels require a state field")
                     cap = args.capacity if len(paths) == 1 and args.capacity else capacity_path(path)
                     if cap and not numeric(pointer_get(snapshot, cap)):
                         if args.capacity:

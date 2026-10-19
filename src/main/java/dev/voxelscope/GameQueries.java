@@ -69,6 +69,7 @@ public final class GameQueries implements BridgeHttp.Queries {
         result.addProperty("name", "VoxelScope");
         result.addProperty("api_version", 1);
         result.addProperty("mekanism_capabilities_integration", ModList.get().isLoaded("mekanism"));
+        result.addProperty("mekanism_matrix_integration", ModList.get().isLoaded("mekanism"));
         result.addProperty("generic_saved_data", true);
         result.addProperty("generic_entity_inspection", true);
         result.addProperty("minecraft", server.getServerVersion());

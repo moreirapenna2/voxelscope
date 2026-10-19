@@ -34,6 +34,20 @@ def numeric(value):
         not isinstance(value, float) or math.isfinite(value))
 
 
+def state_value(value):
+    return isinstance(value, bool) or isinstance(value, str) and len(value) <= 128 or type(value) is int and abs(value) <= 2 ** 63 - 1
+
+
+def state_key(value):
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def continuous(newer, older, interval, boundary=None):
+    return (older["run"], older["session"], older["context"]) == (newer["run"], newer["session"], newer["context"]) and (
+        older["tick"] < newer["tick"] and 0 < newer["monotonic"] - older["monotonic"] <= max(15, interval * 2.5)
+        and (boundary is None or older["received"] > boundary))
+
+
 def metric_context(snapshot, path):
     """Reset trends if a tank changes chemical or a list index refers to another item/slot."""
     contexts = []
@@ -86,7 +100,8 @@ def discover(snapshot, limit=128):
                 walk(item, path + "/" + str(i), depth + 1)
         elif isinstance(value, (str, int, float, bool)):
             row = {"path": path, "type": "boolean" if isinstance(value, bool) else "number" if numeric(value) else "string",
-                   "monitorable": numeric(value) and path not in ("/x", "/y", "/z", "/game_tick"),
+                   "monitorable": (numeric(value) or isinstance(value, bool) or path.startswith("/state/") and state_value(value)) and path not in ("/x", "/y", "/z", "/game_tick"),
+                   "suggested_kind": "state" if isinstance(value, (bool, str)) else "number",
                    "unit": inferred_unit(path)}
             if numeric(value) or isinstance(value, bool):
                 row["current"] = value
@@ -135,7 +150,11 @@ class MonitorStore:
                 profile INTEGER, metric TEXT, state TEXT NOT NULL, PRIMARY KEY(profile,metric));
             CREATE TABLE IF NOT EXISTS leases (name TEXT PRIMARY KEY, owner TEXT NOT NULL, expires REAL NOT NULL);
         """)
-        if "interval" not in {row[1] for row in self.db.execute("PRAGMA table_info(samples)")}:
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(samples)")}
+        if "kind" not in columns:
+            self.db.execute("ALTER TABLE samples ADD COLUMN kind TEXT NOT NULL DEFAULT 'number'")
+            self.db.commit()
+        if "interval" not in columns:
             self.db.execute("ALTER TABLE samples ADD COLUMN interval REAL NOT NULL DEFAULT 5")
             self.db.commit()
 
@@ -161,7 +180,7 @@ class MonitorStore:
         if config["route"] not in ("block", "me", "entity", "data"):
             raise ValueError("Unsupported read-only source")
         if not 1 <= len(config["metrics"]) <= 32:
-            raise ValueError("Select between 1 and 32 numeric fields")
+            raise ValueError("Select between 1 and 32 fields")
         paths = [metric["path"] for metric in config["metrics"]]
         if len(set(paths)) != len(paths):
             raise ValueError("Duplicate field")
@@ -169,6 +188,14 @@ class MonitorStore:
             pointer_get({}, metric["path"])
             if metric.get("capacity_path"):
                 pointer_get({}, metric["capacity_path"])
+            kind = metric.get("kind", "number")
+            if kind not in ("number", "state"):
+                raise ValueError("Metric kind must be number or state")
+            if kind == "state" and any(metric.get(key) is not None for key in ("capacity_path", "below", "above")):
+                raise ValueError("State fields cannot have capacities or numeric thresholds")
+            labels = metric.get("state_labels", {})
+            if not isinstance(labels, dict) or len(labels) > 32 or any(not isinstance(k, str) or len(k) > 256 or not isinstance(v, str) or len(v) > 80 for k, v in labels.items()):
+                raise ValueError("State labels must contain at most 32 short names")
             below, above = metric.get("below"), metric.get("above")
             if any(v is not None and not numeric(v) for v in (below, above)):
                 raise ValueError("Thresholds must be finite numbers")
@@ -236,8 +263,12 @@ class MonitorStore:
         with self.db:
             for metric in profile["config"]["metrics"]:
                 value = pointer_get(snapshot, metric["path"])
-                if not numeric(value):
+                kind = metric.get("kind", "number")
+                if not (state_value(value) if kind == "state" else numeric(value)):
                     missing.append(metric["path"])
+                    continue
+                if kind == "state":
+                    self.record_state(profile, metric, value, snapshot, run_id, interval, received, monotonic, previous)
                     continue
                 cap = pointer_get(snapshot, metric.get("capacity_path", "")) if metric.get("capacity_path") else None
                 self.db.execute("""INSERT INTO samples(profile,revision,metric,observed,received,monotonic,
@@ -256,6 +287,27 @@ class MonitorStore:
         status = "fields_missing" if missing else "ok"
         self.status(profile, status, received, session, tick, json.dumps(missing))
         return status
+
+    def record_state(self, profile, metric, value, snapshot, run_id, interval, received, monotonic, previous):
+        encoded = state_key(value)
+        context = metric_context(snapshot, metric["path"])
+        older = self.db.execute("""SELECT * FROM samples WHERE profile=? AND revision=? AND metric=?
+            ORDER BY id DESC LIMIT 1""", (profile["id"], profile["revision"], metric["path"])).fetchone()
+        newer = {"run": run_id, "session": snapshot["session"], "context": context,
+                 "tick": snapshot["game_tick"], "monotonic": monotonic}
+        # An initial observation or a return after an outage establishes a baseline, never a claimed transition.
+        if (older and previous and previous["status"] == "ok" and older["kind"] == "state"
+                and continuous(newer, older, interval) and encoded != older["value"]):
+            detail = {"path": metric["path"], "previous": json.loads(older["value"]), "value": value}
+            label = metric.get("state_labels", {}).get(encoded)
+            if label:
+                detail["label"] = label
+            self.db.execute("INSERT INTO events(profile,received,kind,detail) VALUES (?,?,?,?)",
+                            (profile["id"], received, "state_change", json.dumps(detail)))
+        self.db.execute("""INSERT INTO samples(profile,revision,metric,observed,received,monotonic,
+            run,session,tick,value,context,capacity,interval,kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (profile["id"], profile["revision"], metric["path"], snapshot.get("observed_at", ""), received,
+             monotonic, run_id, snapshot["session"], snapshot["game_tick"], encoded, context, None, interval, "state"))
 
     def report(self, world, names=None, minutes=60, now=None):
         now = time.time() if now is None else now
@@ -302,6 +354,8 @@ def summarize(rows, metric, interval, now, boundary=None):
     if not rows:
         return out
     latest = rows[0]
+    if metric.get("kind", "number") == "state":
+        return summarize_state(rows, metric, now, boundary)
     interval = latest["interval"]
     out.update(latest=as_number(latest["value"]), observed_at=latest["observed"],
                age_seconds=round(max(0, now - latest["received"]), 2),
@@ -353,6 +407,34 @@ def summarize(rows, metric, interval, now, boundary=None):
         out["estimate_note"] = "Historical trend; latest observation is stale."
     elif "estimated_game_seconds_to_full" in out or "estimated_game_seconds_to_empty" in out:
         out["estimate_note"] = "Assumes this net trend continues; empty/full buffers can hide supply headroom."
+    return out
+
+
+def summarize_state(rows, metric, now, boundary):
+    latest = rows[0]
+    value = json.loads(latest["value"])
+    segment = [latest] if boundary is None or latest["received"] > boundary else []
+    for older in rows[1:]:
+        if not segment or older["kind"] != "state" or not continuous(segment[-1], older, latest["interval"], boundary):
+            break
+        segment.append(older)
+    transitions = sum(a["value"] != b["value"] for a, b in zip(segment, segment[1:]))
+    streak = []
+    for row in segment:
+        if row["value"] != latest["value"]:
+            break
+        streak.append(row)
+    out = {"path": metric["path"], "kind": "state", "latest": value,
+           "observed_at": latest["observed"], "samples_in_window": len(rows),
+           "age_seconds": round(max(0, now - latest["received"]), 2),
+           "stale": now - latest["received"] > max(15, latest["interval"] * 2.5),
+           "continuous_samples": len(segment), "observed_transitions": transitions,
+           "note": "Only sampled transitions are visible; changes between polls can be missed."}
+    label = metric.get("state_labels", {}).get(latest["value"])
+    if label:
+        out["label"] = label
+    if streak:
+        out["same_state_observed_for_game_ticks"] = latest["tick"] - streak[-1]["tick"]
     return out
 
 

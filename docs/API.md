@@ -41,3 +41,12 @@ World identity hashes the save path; it is not a world-content fingerprint. Movi
 Monitoring preserves integers, separates real-time/game-time rates, and resets trend segments across runs, sessions, pauses, availability gaps, and contents changes. ETA assumes the sampled net rate continues. A full buffer cannot reveal surplus upstream production. Sample-based averages interpolate between observations and do not capture every intervening fluctuation.
 
 Monitoring permits 1–16 profiles, 1–32 fields each, intervals 1–300 seconds, and finite duration up to 86,400 seconds. One collector per database is enforced with a lease. History is capped at seven days/200,000 samples and 10,000 events. Reports inspect at most 5,000 recent samples per field and 64 fields. Missing values are not zero. Local thresholds do not control machines or send notifications.
+
+
+## Companion setup/state monitoring (0.4.0)
+
+`bridge.py doctor` is a local diagnostic command, not a new HTTP route. It reads recognized installed mod metadata and queries `/v1/status`. The status response adds `mekanism_matrix_integration` so core Mekanism can be distinguished from its Generators module.
+
+Legacy migration operates only on external SQLite databases. It preserves profile IDs/config revisions and sample precision; the monitor adds a `kind` column to older sample tables with `number` as the default. Existing numeric profile configurations keep their revision and history. New state metrics use `kind: state`; values are JSON-encoded to preserve type. Their optional `state_labels` keys are canonical JSON-encoded scalar values, e.g. `false` for a boolean and `0` for an integer. State metrics cannot use numeric capacities/thresholds.
+
+State transitions are emitted only between continuous observations of the same profile revision, collector run, server session, and contents identity with increasing game ticks and bounded monotonic gaps. Reconnection establishes a baseline. State history uses the same retention/output/collector limits as numeric history. Reports describe sampled evidence rather than the exact time an in-game transition happened.

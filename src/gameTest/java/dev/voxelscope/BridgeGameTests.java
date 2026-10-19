@@ -80,6 +80,7 @@ public class BridgeGameTests {
             var body = com.google.gson.JsonParser.parseString(result.body()).getAsJsonObject();
             helper.assertTrue(body.get("read_only").getAsBoolean(), "Read-only status");
             helper.assertTrue(body.has("world_id"), "External index can distinguish worlds");
+            helper.assertTrue(body.get("mekanism_matrix_integration").getAsBoolean() == ModList.get().isLoaded("mekanism"), "Matrix integration discovery is independent of Generators");
         });
     }
 
