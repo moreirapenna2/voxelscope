@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 — Setup and state monitoring
+
+- Add credential-safe installation/connection diagnostics with `bridge.py doctor`.
+- Add offline legacy database migration with dry runs, integrity/schema checks, WAL-aware backups, no overwrite, and no credential copying.
+- Monitor boolean/string states and explicitly selected integer signals, with named local change events and baseline resets across availability gaps.
+- Preserve existing numeric history and rates with an additive sample-kind schema upgrade.
+- Advertise Matrix integration separately from the Generators module.
+
 ## 0.3.0 — VoxelScope public preview
 
 - Provide a pack-independent Minecraft 1.21.1 NeoForge observation API.
