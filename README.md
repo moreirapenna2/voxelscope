@@ -4,7 +4,7 @@ A local, read-only API for inspecting Minecraft worlds, machines, storage networ
 
 **Preview 0.3.0 · Minecraft 1.21.1 · NeoForge 21.1.233+ (21.1.x) · Java 21**
 
-VoxelScope started as a helper for a StoneBlock 4 world. It has no dependency on that modpack. Other Minecraft versions and Fabric/Forge are not supported by this build.
+VoxelScope works with compatible Minecraft 1.21.1 NeoForge modpacks. Other Minecraft versions and Fabric/Forge are not supported by this build.
 
 ## Features
 
@@ -36,8 +36,6 @@ python tools/bridge.py --instance "/path/to/instance" block 100 64 -20 --side no
 `--instance` defaults to `VOXELSCOPE_INSTANCE` if set, otherwise the current directory. The directory is the one containing `mods/`, not the world save or launcher installation directory. Put global options before the command. For a dedicated server, run the client on that same host; no remote listener is provided.
 
 To uninstall, close the game/server and remove the JAR. External index/history files can be retained or removed separately. VoxelScope registers no gameplay content that needs conversion on removal. Back up worlds before testing preview mods.
-
-**Upgrading from the private StoneBridge builds:** remove the old JAR before installing VoxelScope. The new runtime directory is `voxelscope/`; old external labels/history are not automatically migrated. The game save format is unchanged. Do not install both bridge mods together.
 
 ## Use with an assistant
 

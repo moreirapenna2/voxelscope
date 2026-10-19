@@ -11,3 +11,4 @@ Local read-only Minecraft observation API and companion tools.
 - Use Java 21 and the Gradle wrapper. Python tools require Python 3.10+, standard library only.
 - Optional integrations must stay optional; verify with and without third-party mods.
 - Do not commit runtime databases, worlds, personal paths, connection files, or credentials.
+- Public PRs, releases, issues, commits, and documentation must describe product behavior, reproducible tests, and compatibility. Never include private user data, local installation/migration outcomes, personal world details, or session-specific development/verification status.
