@@ -4,7 +4,7 @@ A local, read-only API for inspecting Minecraft worlds, machines, storage networ
 
 **Preview 0.4.0 · Minecraft 1.21.1 · NeoForge 21.1.233+ (21.1.x) · Java 21**
 
-VoxelScope started as a helper for a StoneBlock 4 world. It has no dependency on that modpack. Other Minecraft versions and Fabric/Forge are not supported by this build.
+VoxelScope works with compatible Minecraft 1.21.1 NeoForge modpacks. Other Minecraft versions and Fabric/Forge are not supported by this build.
 
 ## Features
 
@@ -37,8 +37,6 @@ python tools/bridge.py --instance "/path/to/instance" block 100 64 -20 --side no
 
 To uninstall, close the game/server and remove the JAR. External index/history files can be retained or removed separately. VoxelScope registers no gameplay content that needs conversion on removal. Back up worlds before testing preview mods.
 
-**Upgrading from the private StoneBridge builds:** remove the old JAR before installing VoxelScope. The new runtime directory is `voxelscope/`; use the migration command below to import old external labels/history. The game save format is unchanged. Do not install both bridge mods together.
-
 ## Connection checks and migration
 
 ```sh
@@ -49,7 +47,7 @@ python tools/bridge.py --instance "/path/to/instance" migrate --source "/path/to
 
 `doctor` reports recognized installed JARs, legacy/duplicate installations, connection/authentication failures, a paused/unresponsive world, API compatibility, and available integrations. It never prints credentials or creates runtime files. No connection while Minecraft is closed or at the main menu is expected; an unavailable API alone cannot distinguish those states from a startup failure.
 
-Migration copies `index.sqlite3` and/or `monitor.sqlite3`, including labels, profiles, and numeric history. It uses private snapshots and SQLite backups, handles committed WAL data, checks integrity, clears copied collector leases, and leaves the original directory intact. Credentials, connection files, screenshots, and scan dumps are excluded. Stop source collectors/clients first. Migration refuses an active collector, unknown database schemas, and any destination that already has database data; it never overwrites or merges histories. A dry run validates and reports counts without creating the destination. Choose the old instance's `stonebridge/` directory or a custom external data directory you previously selected.
+Migration copies `index.sqlite3` and/or `monitor.sqlite3`, including labels, profiles, and numeric history. It uses private snapshots and SQLite backups, handles committed WAL data, checks integrity, clears copied collector leases, and leaves the original directory intact. Credentials, connection files, screenshots, and scan dumps are excluded. Stop source collectors/clients first. Migration refuses an active collector, unknown database schemas, and any destination that already has database data; it never overwrites or merges histories. A dry run validates and reports counts without creating the destination. Select a directory containing compatible external index/history databases.
 
 The default destination is `INSTANCE/voxelscope/`; `--index-dir DIR` selects another destination. World identities remain unchanged, so moving/replacing the world still requires refreshing labels/indexes. If a migration is interrupted by a crash, inspect its `.migration-lock` and any partial destination before retrying; do not remove a lock while a migration is running.
 
